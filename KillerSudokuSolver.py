@@ -5,10 +5,17 @@ import time
 
 
 def generate_sudoku_grid():
+    """
+    Generates a fully completed, valid 9x9 Sudoku grid using backtracking.
+    This serves as the 'solution' from which cages and puzzles are derived.
+    """
     def is_valid(grid, row, col, num):
+        # Check if 'num' exists in the current row or column
         for i in range(9):
             if grid[row][i] == num or grid[i][col] == num:
                 return False
+            
+        # Check if 'num' exists in the 3x3 subgrid
         subgrid_row, subgrid_col = 3 * (row // 3), 3 * (col // 3)
         for i in range(subgrid_row, subgrid_row + 3):
             for j in range(subgrid_col, subgrid_col + 3):
@@ -17,16 +24,17 @@ def generate_sudoku_grid():
         return True
 
     def solve(grid):
+        # Find an empty cell (represented by 0)
         for row in range(9):
             for col in range(9):
                 if grid[row][col] == 0:
-                    random.shuffle(numbers)
+                    random.shuffle(numbers) # Randomize to ensure a different grid each time
                     for num in numbers:
                         if is_valid(grid, row, col, num):
                             grid[row][col] = num
-                            if solve(grid):
+                            if solve(grid): # Recursive step
                                 return True
-                            grid[row][col] = 0
+                            grid[row][col] = 0 # Backtrack
                     return False
         return True
 
@@ -37,10 +45,15 @@ def generate_sudoku_grid():
 
 
 def generate_killer_sudoku_cages(grid, max_cage_size=4, min_cages=10):
+    """
+    Partitions parts of the grid into 'cages'. 
+    A cage is a group of connected cells whose values must sum to a specific total.
+    """
     def get_random_starting_cell(available_cells):
         return random.choice(available_cells)
 
     def get_neighbors(cell, available_cells):
+        # Finds adjacent cells (Up, Down, Left, Right) that haven't been assigned a cage yet
         neighbors = []
         row, col = cell
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -52,6 +65,7 @@ def generate_killer_sudoku_cages(grid, max_cage_size=4, min_cages=10):
     available_cells = [(r, c) for r in range(9) for c in range(9)]
     cages = []
 
+    # Continue creating cages until we run out of cells or reach the minimum cage count
     while available_cells and len(cages) < min_cages:
         starting_cell = get_random_starting_cell(available_cells)
         cage_cells = [starting_cell]
@@ -59,6 +73,7 @@ def generate_killer_sudoku_cages(grid, max_cage_size=4, min_cages=10):
 
         cage_size = random.randint(2, max_cage_size)
 
+        # Grow the cage by picking random available neighbors
         while len(cage_cells) < cage_size and available_cells:
             neighbors = []
             for cell in cage_cells:
@@ -66,6 +81,8 @@ def generate_killer_sudoku_cages(grid, max_cage_size=4, min_cages=10):
             if not neighbors:
                 break
             new_cell = random.choice(neighbors)
+            
+            # Calculate the sum of the solution values within this cage
             cage_cells.append(new_cell)
             available_cells.remove(new_cell)
 
@@ -76,6 +93,11 @@ def generate_killer_sudoku_cages(grid, max_cage_size=4, min_cages=10):
 
 
 def generate_starting_board(solution_grid, num_prefilled=20):
+    """
+    Creates the puzzle by revealing a few numbers from the solution grid.
+    In Killer Sudoku, many cells are often left empty because the cage sums 
+    provide the necessary clues.
+    """
     starting_board = np.zeros((9, 9), dtype=int)
     filled_positions = set()
     while len(filled_positions) < num_prefilled:
@@ -88,28 +110,42 @@ def generate_starting_board(solution_grid, num_prefilled=20):
 
 
 def optimized_backtracking_solver(grid, cages):
+    """
+    Solves the Killer Sudoku using Backtracking and Forward Checking.
+    It enforces standard Sudoku rules plus Killer-specific sum/uniqueness rules.
+    """
     def is_valid_killer(grid, row, col, num, cages):
+        # 1. Standard Sudoku Row/Column Constraint
         for i in range(9):
             if grid[row][i] == num or grid[i][col] == num:
                 return False
 
+        # 2. Standard Sudoku 3x3 Subgrid Constraint
         subgrid_row, subgrid_col = 3 * (row // 3), 3 * (col // 3)
         for i in range(subgrid_row, subgrid_row + 3):
             for j in range(subgrid_col, subgrid_col + 3):
                 if grid[i][j] == num:
                     return False
 
+        # 3. Killer Sudoku Cage Constraints
         for cage in cages:
             if (row, col) in cage["cells"]:
                 cage_values = [grid[r][c] for r, c in cage["cells"] if grid[r][c] != 0]
+                
+                # Rule: Values within a cage must be unique
                 if num in cage_values:
                     return False
+
+                # Rule: The sum of the cage cannot exceed the target sum
                 if sum(cage_values) + num > cage["sum"]:
                     return False
                 break
         return True
 
     def forward_checking(grid, domains):
+        """
+        Updates the list of possible values for every cell based on current board state.
+        """
         for r in range(9):
             for c in range(9):
                 if grid[r][c] != 0:
@@ -119,10 +155,15 @@ def optimized_backtracking_solver(grid, cages):
                     domains[r][c] = possible_values
 
     def select_unassigned_variable(domains):
+        """
+        Uses the Minimum Remaining Values (MRV) heuristic.
+        Pick the cell with the fewest possible legal moves to prune the search tree early.
+        """
         min_domain = 10
         selected_cell = None
         for r in range(9):
             for c in range(9):
+                # We look for cells with > 1 option (0 is already filled or invalid)
                 if len(domains[r][c]) > 1 and len(domains[r][c]) < min_domain:
                     min_domain = len(domains[r][c])
                     selected_cell = (r, c)
@@ -131,6 +172,8 @@ def optimized_backtracking_solver(grid, cages):
     def backtrack(grid, domains):
         forward_checking(grid, domains)
         cell = select_unassigned_variable(domains)
+        
+        # If no unassigned cells are left, the puzzle is solved
         if cell is None:
             return True
 
@@ -140,10 +183,11 @@ def optimized_backtracking_solver(grid, cages):
                 grid[row][col] = num
                 if backtrack(grid, domains):
                     return True
-                grid[row][col] = 0
+                grid[row][col] = 0 # Undo move (Backtrack)
         return False
 
     puzzle = np.copy(grid)
+    # Initialize domains: every cell could potentially be 1-9
     domains = [[set(range(1, 10)) for _ in range(9)] for _ in range(9)]
     forward_checking(puzzle, domains)
     if backtrack(puzzle, domains):
